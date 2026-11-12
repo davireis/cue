@@ -369,8 +369,8 @@ func (n *nodeContext) addResolver(p Node, v *Vertex, id CloseInfo, forceIgnore b
 		return id
 	}
 
-	if id.opID != 0 && id.opID != n.ctx.opID {
-		return id
+	if id.opID != n.ctx.opID {
+		id = id.clearCloseCheck()
 	}
 
 	// This can only be true when not using the @experiment(explicitopen).
@@ -526,8 +526,8 @@ func (id CloseInfo) clearCloseCheck() CloseInfo {
 }
 
 func (n *nodeContext) newReq(p Node, id CloseInfo, kind defIDType) CloseInfo {
-	if id.defID != 0 && id.opID != n.ctx.opID {
-		return id.clearCloseCheck()
+	if id.opID != n.ctx.opID {
+		id = id.clearCloseCheck()
 	}
 
 	dstID := n.ctx.getNextDefID(p)
@@ -705,6 +705,9 @@ func (n *nodeContext) closeLiteral(s *StructLit, id CloseInfo) CloseInfo {
 func (n *nodeContext) closedScope(s *StructLit, id CloseInfo, closes Closing, reclose bool) CloseInfo {
 	if n.ctx.OpenDef {
 		return id
+	}
+	if id.opID != n.ctx.opID {
+		id = id.clearCloseCheck()
 	}
 	outer := id.outerID
 	k := len(n.reqDefIDs)

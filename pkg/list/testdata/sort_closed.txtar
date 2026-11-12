@@ -1,0 +1,92 @@
+# Closedness of close() and definition disjunctions must be preserved when
+# list.Sort re-evaluates conjuncts created in a different OpContext.
+
+-- in.cue --
+import "list"
+
+#Branch1: {name: string, priority?: int, line: string}
+#Branch2: {name: string, priority?: int, do: string}
+
+#ProjClose: {
+	_el: close({name: string, priority?: int, line: string}) |
+		close({name: string, priority?: int, do: string})
+	m: *null | {[string]~(Name,_): (_el & {name: Name}) | null}
+}
+
+#ProjDef: {
+	_el: #Branch1 | #Branch2
+	m:   *null | {[string]~(Name,_): (_el & {name: Name}) | null}
+}
+
+#MapToList: {
+	in: {[string]: _}
+	_flat: [for v in in if v != null {v & {priority: *0 | int}}]
+	out: list.Sort(_flat, {x: {}, y: {}, less: x.priority < y.priority})
+}
+
+byClose: (#MapToList & {
+	in: (#ProjClose & {
+		m: {
+			a: {name: "a", priority: -4, line: "ENV Y=2"}
+			b: {name: "b", priority: -5, line: "ENV X=1"}
+		}
+	}).m
+}).out
+
+byDef: (#MapToList & {
+	in: (#ProjDef & {
+		m: {
+			a: {name: "a", priority: -4, do: "RUN y"}
+			b: {name: "b", priority: -5, line: "ENV X=1"}
+		}
+	}).m
+}).out
+
+openInput: (#MapToList & {
+	in: {
+		a: {priority: 2, extra: "a"}
+		b: {priority: 1, extra: "b"}
+	}
+}).out
+-- out/list-v3 --
+#Branch1: {
+	name:      string
+	priority?: int
+	line:      string
+}
+#Branch2: {
+	name:      string
+	priority?: int
+	do:        string
+}
+#ProjClose: m: *null | {}
+#ProjDef: m:   *null | {}
+#MapToList: {
+	in:  {}
+	out: []
+}
+byClose: [{
+	name:     "b"
+	priority: -5
+	line:     "ENV X=1"
+}, {
+	name:     "a"
+	priority: -4
+	line:     "ENV Y=2"
+}]
+byDef: [{
+	name:     "b"
+	priority: -5
+	line:     "ENV X=1"
+}, {
+	name:     "a"
+	priority: -4
+	do:       "RUN y"
+}]
+openInput: [{
+	priority: 1
+	extra:    "b"
+}, {
+	priority: 2
+	extra:    "a"
+}]
