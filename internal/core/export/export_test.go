@@ -466,3 +466,124 @@ func TestNoPanicCyclicBuiltinValidator(t *testing.T) {
 		_, _ = export.Def(r, "", x)
 	})
 }
+
+func TestResolveLetSelf(t *testing.T) {
+	// LetReference.resolve resolves `let T = self` directly to the enclosing
+	// vertex rather than a 1-conjunct LetField arc. When resolveLet expands T
+	// outside its declaring frame (let == nil), ref may hold multiple conjuncts
+	// (all of which must be exported) or 0 conjuncts (dep's empty placeholder
+	// vertex, which previously panicked in Conjunct.EnvExpr).
+	cuetdtest.FullMatrix.Run(t, "multiConjunct", func(t *testing.T, m *cuetdtest.M) {
+		ctx := m.CueContext()
+		v := ctx.CompileString(`
+			@experiment(aliasv2)
+			s: string
+			#M: {
+				let T = self
+				a: 1
+				p: T[s]
+			}
+			#M: {
+				b: 2
+			}
+			x: #M.p
+		`)
+		if err := v.Err(); err != nil {
+			t.Fatal(err)
+		}
+		syn, err := format.Node(v.Syntax(cue.Definitions(true)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		recompiled := ctx.CompileBytes(syn)
+		if err := recompiled.Err(); err != nil {
+			t.Fatalf("recompile exported syntax:\n%s\nerr: %v", syn, err)
+		}
+		for _, tc := range []struct {
+			key  string
+			want int64
+		}{
+			{"a", 1},
+			{"b", 2},
+		} {
+			u := recompiled.FillPath(cue.ParsePath("s"), tc.key)
+			got, err := u.LookupPath(cue.ParsePath("x")).Int64()
+			if err != nil || got != tc.want {
+				t.Errorf("s=%q: got (%d, %v), want %d\nexported:\n%s", tc.key, got, err, tc.want, syn)
+			}
+		}
+	})
+
+	cuetdtest.FullMatrix.Run(t, "emptyPlaceholder", func(t *testing.T, m *cuetdtest.M) {
+		const archive = `
+-- cue.mod/module.cue --
+module: "mod.test/a"
+language: version: "v0.18.0"
+-- app/app.cue --
+package app
+
+import "strings"
+
+#Game: {
+	let G = self
+	championship: string
+	played:       bool
+	out:          "\(G.championship)-\(G.played)-\(G.championship)"
+}
+#Team: {
+	let T = self
+	championship: string
+	preview:      bool
+	_pop:         [if T.preview {"\((#Game & {championship: T.championship, played: true}).out)"}, ""][0]
+	out:          "\(T._pop)"
+}
+#Cells: {
+	let S = self
+	championship_param: string
+	preview:            *false | bool
+	out: strings.Join([for _ in [1] {
+		[if S.championship_param != "" {(#Team & {championship: S.championship_param, preview: S.preview}).out}, ""][0]
+	}], "")
+}
+_cells: (#Cells & {championship_param: "{p}"}).out
+code: surface: screens: {
+	a: {route: "/a", body: "\(_cells)"}
+	b: {route: "/b", body: "\((#Cells & {championship_param: "{s}", preview: true}).out)"}
+}
+-- in.cue --
+package main
+
+import "mod.test/a/app"
+
+#Plan: {
+	let L = self
+	raw:     bool
+	surface: *null | _
+	_details: [if L.surface != null for _, s in L.surface.screens {s.route}]
+	files: {if L.raw {"out.txt": _details}}
+}
+env: {
+	let P = self
+	surface: *null | _
+	llms: #Plan & {surface: P.surface, raw: bool}
+	files: {for k, f in P.llms.files {(k): f}}
+} & {
+	surface: app.code.surface
+}
+x: env.files
+`
+		ctx := m.CueContext()
+		insts := cuetxtar.Load(txtar.Parse([]byte(archive)), t.TempDir())
+		if err := insts[0].Err; err != nil {
+			t.Fatal(err)
+		}
+		v := ctx.BuildInstance(insts[0])
+		if err := v.Err(); err != nil {
+			t.Fatal(err)
+		}
+		x := v.LookupPath(cue.ParsePath("x"))
+		if _, err := format.Node(x.Syntax()); err != nil {
+			t.Fatal(err)
+		}
+	})
+}

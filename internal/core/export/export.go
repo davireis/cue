@@ -882,8 +882,11 @@ func (e *exporter) resolveLet(env *adt.Environment, x *adt.LetReference) ast.Exp
 
 	switch {
 	case let == nil:
+		// A let-self binding resolves directly to its enclosing vertex rather
+		// than a synthetic single-conjunct let arc, which may be a bare
+		// placeholder vertex (from dep analysis) or hold multiple conjuncts.
 		ref, _ := e.ctx.Lookup(env, x)
-		if ref == nil {
+		if ref == nil || (ref.BaseValue == nil && !ref.HasConjuncts()) {
 			// This can happen if x.X does not resolve to a valid value. At this
 			// point we will not get a valid configuration.
 
@@ -894,8 +897,10 @@ func (e *exporter) resolveLet(env *adt.Environment, x *adt.LetReference) ast.Exp
 
 			return e.expr(env, x.X)
 		}
-		c, _ := ref.SingleConjunct()
-		return e.expr(c.EnvExpr())
+		if c, count := ref.SingleConjunct(); count == 1 {
+			return e.expr(c.EnvExpr())
+		}
+		return e.expr(nil, ref)
 
 	case let.Expr == nil:
 		label := e.uniqueLetIdent(x.Label, x.X)
