@@ -188,8 +188,6 @@ func (c *Context) BuildExpr(x ast.Expr, options ...BuildOption) Value {
 	r := c.runtime()
 	cfg := c.parseOptions(options)
 
-	ctx := c.ctx()
-
 	// TODO: move to runtime?: it probably does not make sense to treat BuildExpr
 	// and the expression resulting from CompileString differently.
 	astutil.ResolveExpr(x, errFn)
@@ -200,9 +198,10 @@ func (c *Context) BuildExpr(x ast.Expr, options ...BuildOption) Value {
 	if err != nil {
 		return c.makeError(err)
 	}
+	ctx := c.ctx()
 	v := adt.Resolve(ctx, conjunct)
 
-	return c.make(v)
+	return c.makeWith(ctx, v)
 }
 
 func errFn(pos token.Pos, msg string, args ...interface{}) {}
@@ -255,7 +254,10 @@ func (c *Context) CompileBytes(b []byte, options ...BuildOption) Value {
 // }
 
 func (c *Context) make(v *adt.Vertex) Value {
-	opCtx := newContext(c.runtime())
+	return c.makeWith(c.ctx(), v)
+}
+
+func (c *Context) makeWith(opCtx *adt.OpContext, v *adt.Vertex) Value {
 	// TODO: this is currently needed to ensure that node is properly recognized
 	// as evaluated. Not dereferencing nodes, however, will have the benefit of
 	// retaining more information. Remove the indirection when the code will be
@@ -388,7 +390,7 @@ func (c *Context) Encode(x any, option ...EncodeOption) Value {
 	ctx := c.ctx()
 	// TODO: is true the right default?
 	val := convert.FromGoValue(ctx, x, options.nilIsTop)
-	return c.make(adt.ToVertex(val))
+	return c.makeWith(ctx, adt.ToVertex(val))
 }
 
 // EncodeType converts a Go type to a CUE [Value].
@@ -404,9 +406,10 @@ func (c *Context) EncodeType(x any, option ...EncodeOption) Value {
 	ctx := c.ctx()
 	v, err := convert.FromGoType(ctx, x)
 	if err != nil {
+		adt.AddStats(ctx)
 		return c.makeError(err)
 	}
-	return c.make(v)
+	return c.makeWith(ctx, v)
 }
 
 // NewList creates a Value that is a list of the given values.
@@ -417,7 +420,8 @@ func (c *Context) NewList(v ...Value) Value {
 	for i, x := range v {
 		a[i] = x.v
 	}
-	return c.make(c.ctx().NewList(a...))
+	ctx := c.ctx()
+	return c.makeWith(ctx, ctx.NewList(a...))
 }
 
 // TODO:

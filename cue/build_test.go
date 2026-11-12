@@ -149,6 +149,17 @@ func TestBuildExprClose(t *testing.T) {
 	if err := v.Unify(w).Err(); err == nil {
 		t.Error("close({}) unified with a:1 should fail, but succeeded")
 	}
+
+	// Finalizing an inline conjunction within BuildExpr must run in the same
+	// OpContext that resolved it so GenerationMismatch does not skip checkTypos.
+	parsed, err := parser.ParseExpr("test", `close({a?: string}) & {b: "bad"}`)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.ErrorMatches(ctx.BuildExpr(parsed).Err(), `b: field not allowed`))
+
+	scope := ctx.CompileString(`#Def: {a?: string}`)
+	parsed, err = parser.ParseExpr("test", `#Def & {b: "bad"}`)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.ErrorMatches(ctx.BuildExpr(parsed, cue.Scope(scope)).Err(), `b: field not allowed`))
 }
 
 func TestBuildExprCloseList(t *testing.T) {
